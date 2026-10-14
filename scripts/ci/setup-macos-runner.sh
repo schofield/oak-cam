@@ -259,14 +259,21 @@ else
     # later brew or rustup install reaches them without re-registering.
     [ -x ./env.sh ] && ./env.sh >/dev/null 2>&1 || true
     ./svc.sh stop >/dev/null 2>&1 || true
+    # svc.sh writes SessionCreate=true into the plist, which gives jobs a
+    # security session of their own: codesign then fails with
+    # errSecInternalComponent and notarytool cannot read its keychain profile
+    # (seen on the first service run). Jobs must share the login session's
+    # keychain, so turn it off; svc.sh install would write it back.
+    plist="$(cat .service)"
+    if [ -f "$plist" ]; then
+        /usr/libexec/PlistBuddy -c 'Set :SessionCreate false' "$plist" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c 'Add :SessionCreate bool false' "$plist"
+        ok "SessionCreate off in $plist (jobs use the login keychain)"
+    fi
     ./svc.sh start
     ok "service $(cat .service) started"
-    plist="$(cat .service)"
-    if [ -f "$plist" ] && plutil -p "$plist" 2>/dev/null | grep -q '"SessionCreate" => 1'; then
-        warn "the LaunchAgent sets SessionCreate, which gives jobs their own security session;"
-        warn "if codesign fails with errSecInternalComponent, run the runner interactively ($RUNNER_DIR/run.sh)"
-        warn "or allow codesign and notarytool on the key: security set-key-partition-list -S apple-tool:,apple: -s ~/Library/Keychains/login.keychain-db"
-    fi
+    ok "if codesign still fails with errSecInternalComponent, allow the tools on the key once:"
+    ok "  security set-key-partition-list -S apple-tool:,apple: -s ~/Library/Keychains/login.keychain-db"
 fi
 
 step "Runners registered for $REPO"
