@@ -82,7 +82,7 @@ bundle_build="$(plutil -extract CFBundleVersion raw -o - "$app/Contents/Info.pli
 ext_build="$(plutil -extract CFBundleVersion raw -o - "$ext/Contents/Info.plist")"
 # build-macos.sh stamps CFBundleVersion as <major>.<minor>.<HEAD commit time>,
 # so the bundle must come from the commit this package is labelled with.
-expected_build="$(echo "$version" | cut -d. -f1,2).$(git -C "$ws" show -s --format=%ct HEAD)"
+expected_build="$(echo "$version" | cut -d. -f1,2).$(git -C "$ws" -c log.showSignature=false show -s --format=%ct HEAD)"
 [ "$bundle_build" = "$expected_build" ] \
     || die "bundle CFBundleVersion $bundle_build is not $expected_build for HEAD $sha7: stale dist/oak-cam.app? (rebuild with build-macos.sh)"
 if [ -n "$(git -C "$ws" status --porcelain --untracked-files=no 2>/dev/null)" ]; then

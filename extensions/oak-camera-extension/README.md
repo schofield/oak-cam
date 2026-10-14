@@ -66,8 +66,8 @@ Rules carried over from stream-concern (all measured there):
   `systemextensionsctl developer on`, which, like ad-hoc activation, needs SIP off.
 - **Bump CFBundleVersion** for every rebuilt extension (default
   `<major>.<minor>.<HEAD commit time in seconds>`, which only grows; pass
-  `--build` for uncommitted rebuilds). Changing the device list may also need a reboot before macOS shows
-  the new devices.
+  `--build` for uncommitted rebuilds). Changing the device list may also need
+  a reboot before macOS shows the new devices.
 - Grant Camera access to whatever runs `oak-cam` (Terminal, or the app) if
   `CMIOStreamCopyBufferQueue` returns no queue.
 
