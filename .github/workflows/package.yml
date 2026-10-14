@@ -64,10 +64,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           clean: false
-          # build-macos.sh stamps CFBundleVersion with `git rev-list --count`,
-          # and package-macos.sh checks it; a shallow clone would make every
-          # build 0.1.1 and macOS would never replace an installed extension.
-          fetch-depth: 0
 
       # A self-hosted Windows runner resolves `bash` to the WSL launcher in
       # System32 (hosted runners put Git's bin first); every `shell: bash`

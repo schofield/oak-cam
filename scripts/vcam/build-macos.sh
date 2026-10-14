@@ -47,10 +47,13 @@
 #                          activate a Developer ID system extension from an app
 #                          without a notarisation ticket.
 #   --version <x.y.z>      CFBundleShortVersionString (default: Cargo.toml).
-#   --build <n>            CFBundleVersion (default <major>.<minor>.<git commit
-#                          count>). A rebuilt extension MUST carry a higher
-#                          CFBundleVersion or macOS keeps running the old one;
-#                          pass --build when reinstalling uncommitted changes.
+#   --build <n>            CFBundleVersion (default <major>.<minor>.<HEAD commit
+#                          time, seconds since the epoch>). A rebuilt extension
+#                          MUST carry a higher CFBundleVersion or macOS keeps
+#                          running the old one; the commit time only grows, and
+#                          unlike a commit count it survives a history rewrite
+#                          or a shallow clone. Pass --build when reinstalling
+#                          uncommitted changes.
 #   --arch <arm64|x86_64|universal>   extension slices (default universal,
 #                          falling back to the host arch).
 #   --binary <path>        use this oak-cam binary instead of cargo build.
@@ -200,12 +203,13 @@ if [[ -z "$VERSION" ]]; then
     VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/Cargo.toml" | head -1)"
     [[ -n "$VERSION" ]] || die "could not read version from Cargo.toml"
 fi
-# Apple caps CFBundleVersion at three integers, so the commit count is the
-# third field; it only grows with history, so a rebuilt extension from a later
-# commit replaces the installed one.
+# Apple caps CFBundleVersion at three integers, so the HEAD commit time
+# (seconds since the epoch) is the third field; it only grows, so a rebuilt
+# extension from a later commit replaces the installed one. Builds before
+# 2026-10-14 used the commit count (up to 0.1.92), which is lower.
 if [[ -z "$BUILD" ]]; then
-    if count="$(git -C "$REPO_ROOT" rev-list --count HEAD 2>/dev/null)" && [[ -n "$count" ]]; then
-        BUILD="$(echo "$VERSION" | cut -d. -f1,2).$count"
+    if ctime="$(git -C "$REPO_ROOT" show -s --format=%ct HEAD 2>/dev/null)" && [[ "$ctime" =~ ^[0-9]+$ ]]; then
+        BUILD="$(echo "$VERSION" | cut -d. -f1,2).$ctime"
         if [[ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]]; then
             warn "uncommitted changes: CFBundleVersion $BUILD may equal an installed build;"
             warn "pass --build <higher n> before installing a changed extension."
