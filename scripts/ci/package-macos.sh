@@ -44,6 +44,19 @@ notarize_profile=""
 die() { echo "error: $*" >&2; exit 1; }
 say() { echo ">> $*"; }
 
+# stapler validate looks the ticket up at Apple's CloudKit ticket service even
+# when one is stapled, so a blip there fails an otherwise good bundle; retry
+# before giving up, and show stapler's own message on each failure.
+stapler_validate() {
+    local target="$1" attempt out
+    for attempt in 1 2 3; do
+        if out="$(xcrun stapler validate "$target" 2>&1)"; then return 0; fi
+        echo "   stapler validate failed (attempt $attempt): $(printf '%s\n' "$out" | tail -1)" >&2
+        [ "$attempt" -lt 3 ] && sleep 5
+    done
+    return 1
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --app) app="${2:?--app needs a path}"; shift 2 ;;
@@ -127,7 +140,8 @@ else
     [ -n "$authority" ] || die "not signed with a Developer ID Application identity (pass --allow-unnotarized for a test build)"
     say "signed by $authority"
     say "validating the stapled notarisation ticket"
-    xcrun stapler validate "$app" || die "no valid notarisation ticket stapled to $app (build-macos.sh --notarize)"
+    [ -f "$app/Contents/CodeResources" ] || die "no notarisation ticket stapled to $app (build-macos.sh --notarize)"
+    stapler_validate "$app" || die "the ticket stapled to $app does not validate (build-macos.sh --notarize)"
     say "Gatekeeper assessment"
     assess="$(spctl --assess --type execute --verbose=2 "$app" 2>&1)" || die "Gatekeeper rejected $app: $assess"
     echo "   $assess" | tr '\n' ' '; echo
@@ -252,7 +266,13 @@ shipped="$reloc/unzipped/$pkg/oak-cam.app"
 [ -d "$shipped" ] || die "the archive did not extract to $pkg/oak-cam.app"
 codesign --verify --deep --strict "$shipped" || die "the extracted bundle's signature is broken"
 if [ "$notarized" = "yes" ]; then
-    xcrun stapler validate "$shipped" >/dev/null || die "the extracted bundle lost its notarisation ticket"
+    # The ticket is the plain file Contents/CodeResources; an offline
+    # byte-for-byte comparison with the source app proves the zip kept it.
+    cmp -s "$app/Contents/CodeResources" "$shipped/Contents/CodeResources" \
+        || die "the extracted bundle's stapled ticket differs from the source app's"
+    if ! stapler_validate "$shipped"; then
+        echo "::warning::stapler could not validate the extracted copy (ticket identical to the source, which validated; likely Apple's ticket service)" >&2
+    fi
     spctl --assess --type execute "$shipped" || die "Gatekeeper rejected the extracted bundle"
 fi
 "$shipped/Contents/MacOS/oak-cam" --version >/dev/null || die "the extracted oak-cam does not run"
@@ -301,7 +321,7 @@ if [ "$make_dmg" = "1" ]; then
                     die "Apple did not accept $dmg"
                 fi
                 xcrun stapler staple "$stage/$dmg"
-                xcrun stapler validate "$stage/$dmg" || die "no valid ticket stapled to $dmg"
+                stapler_validate "$stage/$dmg" || die "the ticket stapled to $dmg does not validate"
                 assess="$(spctl --assess --type open --context context:primary-signature --verbose=2 "$stage/$dmg" 2>&1)" \
                     || die "Gatekeeper rejected $dmg: $assess"
                 echo "   $assess" | tr '\n' ' '; echo
