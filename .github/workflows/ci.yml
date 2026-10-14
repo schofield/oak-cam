@@ -1,0 +1,182 @@
+# Hosted CI: the weekly cross-platform safety net, or run by hand with
+#   gh workflow run ci.yml
+#   gh workflow run ci.yml -f depthai_next_tag=v3.11.0
+# Hosted minutes are billed (macOS counts 10x, Windows 2x), so the per-push
+# checks run on the owner's self-hosted Linux/Windows box
+# (self-hosted-ci.yml). This workflow is the only place macOS is built in CI:
+# the box has no macOS. Hardware tests (#[ignore]) never run here; see
+# hardware.yml.
+name: CI
+
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      depthai_next_tag:
+        description: >-
+          depthai-core tag or branch for the depthai-next job. Empty: the
+          latest luxonis/depthai-core release, or `develop` when that is the
+          pinned tag already.
+        default: ""
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  DEPTHAI_TAG: v3.10.0
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # fmt / clippy / test on the three OSes against the pinned depthai-core.
+  # The depthai install (a 20-60 min cold build on macOS/Linux) is cached,
+  # keyed on the tag and the hash of scripts/depthai/**; the build trees are
+  # not cached, only the install prefix.
+  # ---------------------------------------------------------------------------
+  check:
+    name: check (${{ matrix.os }})
+    timeout-minutes: 90
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-24.04, windows-2025]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # rustup installs the channel and components rust-toolchain.toml pins.
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: |
+          rustup toolchain install
+          rustc --version
+          cargo --version
+
+      - name: depthai install root
+        id: root
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # C:/Users/... form: valid for actions/cache and for bash.
+            root="$(cygpath -m "$LOCALAPPDATA")/oak-cam/depthai"
+          else
+            root="$HOME/.cache/oak-cam/depthai"
+          fi
+          echo "root=$root" >> "$GITHUB_OUTPUT"
+
+      - name: Cache depthai-core install
+        id: cache
+        uses: actions/cache@v4
+        with:
+          # The install prefix, plus on Windows the pinned OpenCV tree. The
+          # `current` link is recreated below on every run (tar does not
+          # round-trip a Windows junction).
+          path: |
+            ${{ steps.root.outputs.root }}/${{ env.DEPTHAI_TAG }}
+            ${{ steps.root.outputs.root }}/opencv-*
+          key: depthai-${{ runner.os }}-${{ runner.arch }}-${{ env.DEPTHAI_TAG }}-${{ hashFiles('scripts/depthai/**') }}
+
+      - name: Build dependencies (Linux)
+        if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config libudev-dev libusb-1.0-0-dev
+
+      - name: Build dependencies (macOS)
+        if: runner.os == 'macOS' && steps.cache.outputs.cache-hit != 'true'
+        run: brew install cmake ninja pkg-config
+
+      - name: Build depthai-core (macOS/Linux, cache miss)
+        if: runner.os != 'Windows' && steps.cache.outputs.cache-hit != 'true'
+        run: scripts/depthai/build.sh
+
+      - name: Link current (macOS/Linux)
+        if: runner.os != 'Windows'
+        run: |
+          root="${{ steps.root.outputs.root }}"
+          ln -sfn "$root/$DEPTHAI_TAG" "$root/current"
+          test -f "$root/current/oak-flags.json"
+
+      # Idempotent: on a cache hit it only recreates the junction and re-runs
+      # the probe (seconds).
+      - name: Fetch depthai-core (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\depthai\fetch-windows.ps1
+
+      - name: Put depthai DLLs on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "$env:LOCALAPPDATA\oak-cam\depthai\current\bin" |
+            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test --workspace
+
+      - name: Camera extension and app bundle, ad-hoc signed (macOS)
+        if: runner.os == 'macOS'
+        run: scripts/vcam/build-macos.sh --check --identity - --out dist
+
+      - name: Virtual camera DLL (Windows)
+        if: runner.os == 'Windows'
+        run: cargo build -p oak-mf-vcam
+
+      - name: Release build (Linux)
+        if: runner.os == 'Linux'
+        run: cargo build --release
+
+  # ---------------------------------------------------------------------------
+  # API drift canary: build the shim against the next
+  # depthai-core tag. Allowed to fail; a red run means the next bump needs
+  # shim work, not that main is broken.
+  # ---------------------------------------------------------------------------
+  depthai-next:
+    timeout-minutes: 90
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config libudev-dev libusb-1.0-0-dev
+
+      - name: Pick the tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.depthai_next_tag }}
+        run: |
+          tag="$INPUT_TAG"
+          if [ -z "$tag" ]; then
+            tag="$(gh release view -R luxonis/depthai-core --json tagName -q .tagName)"
+            if [ "$tag" = "$DEPTHAI_TAG" ]; then tag=develop; fi
+          fi
+          echo "depthai-core next: $tag (pinned: $DEPTHAI_TAG)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Build depthai-core (next)
+        run: scripts/depthai/build.sh --tag "${{ steps.tag.outputs.tag }}" --root "$RUNNER_TEMP/depthai"
+
+      - name: Build and test against it
+        env:
+          DEPTHAI_PREFIX: ${{ runner.temp }}/depthai/${{ steps.tag.outputs.tag }}
+        run: |
+          cargo build --workspace --all-targets
+          cargo test --workspace

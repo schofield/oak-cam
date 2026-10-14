@@ -1,0 +1,32 @@
+[package]
+name = "oak-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "oak-cam core: config model, control diffing, supervisor and capture threads (no GUI)"
+publish = false
+build = "build.rs"
+
+[lib]
+doctest = false
+
+[dependencies]
+crossbeam-channel.workspace = true
+depthai = { path = "../depthai" }
+# Only for the `links = "depthai"` metadata (DEP_DEPTHAI_LIBDIR) in build.rs,
+# so this crate's own test binaries find libdepthai-core.
+depthai-sys = { path = "../depthai-sys" }
+dirs = "6"
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+toml_edit = { version = "0.23", default-features = false, features = ["parse", "display"] }
+tracing.workspace = true
+vcam = { path = "../vcam" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

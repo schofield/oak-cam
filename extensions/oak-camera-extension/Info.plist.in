@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>          <string>en</string>
+    <key>CFBundleExecutable</key>                 <string>@BUNDLE_ID@</string>
+    <key>CFBundleIdentifier</key>                 <string>@BUNDLE_ID@</string>
+    <key>CFBundleName</key>                       <string>@BUNDLE_ID@</string>
+    <key>CFBundleDisplayName</key>                <string>oak-cam Cameras</string>
+    <key>CFBundlePackageType</key>                <string>SYSX</string>
+    <key>CFBundleInfoDictionaryVersion</key>      <string>6.0</string>
+    <key>CFBundleShortVersionString</key>         <string>@VERSION@</string>
+    <key>CFBundleVersion</key>                    <string>@BUILD@</string>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>MacOSX</string>
+    </array>
+    <key>LSMinimumSystemVersion</key>             <string>@MIN_MACOS@</string>
+    <key>NSHumanReadableCopyright</key>           <string>Copyright (c) 2026 Grant Schofield / surlysoft. MIT licensed.</string>
+    <key>NSSystemExtensionUsageDescription</key>  <string>This camera extension publishes the three OAK-D Pro sensors (RGB, left and right mono) as cameras other apps can select.</string>
+    <key>CMIOExtension</key>
+    <dict>
+        <key>CMIOExtensionMachServiceName</key>   <string>@TEAM_ID@.@BUNDLE_ID@</string>
+    </dict>
+    <!--
+      One CoreMediaIO device per OAK sensor. The UUIDs are pinned: the Rust side
+      (crates/vcam/src/camera_id.rs, CAMERAS) carries the same values and a unit
+      test checks the two agree. Changing this list needs a CFBundleVersion bump
+      (and sometimes a reboot) before macOS shows the new devices.
+    -->
+    <key>OakCameras</key>
+    <array>
+        <dict>
+            <key>Name</key>                       <string>OAK RGB</string>
+            <key>Kind</key>                       <string>rgb</string>
+            <key>DeviceUUID</key>                 <string>3B47A5CF-F57E-4C20-8A99-97F002D9A947</string>
+            <key>SourceUUID</key>                 <string>59C671E1-F908-408C-A68F-A6B4D4514D02</string>
+            <key>SinkUUID</key>                   <string>AB3FCD34-3403-48E5-8E68-63A195CD50BD</string>
+        </dict>
+        <dict>
+            <key>Name</key>                       <string>OAK Left</string>
+            <key>Kind</key>                       <string>mono</string>
+            <key>DeviceUUID</key>                 <string>9D2BC40B-FC42-4646-9935-C5B4D9776122</string>
+            <key>SourceUUID</key>                 <string>874750B0-9C5F-494B-B007-B9D69812443B</string>
+            <key>SinkUUID</key>                   <string>1C916B8D-1F4C-4545-A9F9-BD4ECCD3FF5D</string>
+        </dict>
+        <dict>
+            <key>Name</key>                       <string>OAK Right</string>
+            <key>Kind</key>                       <string>mono</string>
+            <key>DeviceUUID</key>                 <string>490657B4-CA80-4657-B900-5E57EEEB06E9</string>
+            <key>SourceUUID</key>                 <string>805C8E3F-7673-47C7-81E9-E544BA8C9B07</string>
+            <key>SinkUUID</key>                   <string>BBD8C4BA-A1BB-4141-BD96-1347F80421C7</string>
+        </dict>
+    </array>
+</dict>
+</plist>

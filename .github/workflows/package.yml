@@ -1,0 +1,266 @@
+# Dispatch-only. Builds a native, relocatable TEST package of the checked-out
+# ref on the owner's self-hosted box, for whichever OS it is booted into:
+#   gh workflow run package.yml -f os=windows
+#   gh workflow run package.yml -f os=linux
+# or the Linux package on a GitHub-hosted ubuntu-24.04 runner, for when the
+# box is booted into Windows:
+#   gh workflow run package.yml -f os=linux-hosted
+# linux-hosted mirrors ci.yml's Linux `check` steps for depthai-core and
+# shares its cache (same path and key), so a run after a weekly CI run starts
+# warm. A cold run builds depthai-core from source first (20-60 min) and
+# bills hosted minutes.
+# The signed macOS package comes from the owner's Mac, registered with
+# scripts/ci/setup-macos-runner.sh as [self-hosted, macos]:
+#   gh workflow run package.yml -f os=macos
+# It runs scripts/vcam/build-macos.sh --check with the Developer ID identity
+# in that Mac's keychain, the provisioning profile named by the repository
+# variable OAK_MACOS_PROFILE_NAME (default "OakCam Developer ID") from Xcode's
+# profile store, and the notarytool keychain profile OAK_NOTARY_PROFILE
+# (default sc-notary); then scripts/ci/package-macos.sh --dmg --notarize
+# writes the zip and a notarised DMG.
+# The result is a workflow artifact "oak-cam-<os>-<sha7>" holding the archive
+# (and the DMG on macOS), SHA256SUMS.txt and BUILD-INFO.json (30-day
+# retention); fetch it with
+#   gh run download <run-id>
+# Linux and Windows packages are unsigned. The release CI is M8.
+name: Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: >-
+          Self-hosted OS to run on (matches the runner's second label), or
+          linux-hosted for a GitHub-hosted ubuntu-24.04 runner
+        type: choice
+        options:
+          - linux
+          - windows
+          - macos
+          - linux-hosted
+        default: linux
+
+concurrency:
+  group: package-${{ inputs.os }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep in step with ci.yml: the hosted path shares its depthai cache key.
+  DEPTHAI_TAG: v3.10.0
+
+jobs:
+  package:
+    # macOS: a cold depthai build plus two notarisations with --wait.
+    timeout-minutes: ${{ inputs.os == 'macos' && 150 || 90 }}
+    # A string for the hosted runner, a label array for the self-hosted box.
+    runs-on: ${{ inputs.os == 'linux-hosted' && 'ubuntu-24.04' || fromJSON(format('["self-hosted","{0}"]', inputs.os)) }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Keep the self-hosted workspace between runs: the default clean removes
+      # ignored files, which throws away target/ every run.
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+          # build-macos.sh stamps CFBundleVersion with `git rev-list --count`,
+          # and package-macos.sh checks it; a shallow clone would make every
+          # build 0.1.1 and macOS would never replace an installed extension.
+          fetch-depth: 0
+
+      # A self-hosted Windows runner resolves `bash` to the WSL launcher in
+      # System32 (hosted runners put Git's bin first); every `shell: bash`
+      # step needs Git Bash, so prepend it.
+      - name: Prefer Git Bash over WSL for bash steps (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $git = (Get-Command git.exe).Source
+          $bin = Join-Path (Split-Path (Split-Path $git -Parent) -Parent) "bin"
+          if (-not (Test-Path (Join-Path $bin "bash.exe"))) { throw "Git Bash not found under $bin" }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+
+      # The Mac runner is a LaunchAgent, whose PATH is launchd's; cargo and
+      # rustup live in ~/.cargo/bin.
+      - name: Cargo and Homebrew on PATH (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          [ -d /opt/homebrew/bin ] && echo /opt/homebrew/bin >> "$GITHUB_PATH"
+          true
+
+      # Fail in seconds, not after the depthai and cargo builds, when the
+      # runner's session cannot reach the signing identity or the notarytool
+      # credentials (a LaunchAgent without an interactive keychain session
+      # gives errSecInternalComponent at codesign time).
+      - name: Signing preflight (macOS)
+        if: runner.os == 'macOS'
+        env:
+          NOTARY_PROFILE: ${{ vars.OAK_NOTARY_PROFILE || 'sc-notary' }}
+          TEAM_ID: ${{ vars.OAK_TEAM_ID || '5V2V8BX632' }}
+        run: |
+          ids="$(security find-identity -v -p codesigning 2>&1 || true)"
+          if ! printf '%s\n' "$ids" | grep -q "Developer ID Application: .*($TEAM_ID)"; then
+            echo "::error::no 'Developer ID Application: … ($TEAM_ID)' identity visible to this runner session"
+            exit 1
+          fi
+          echo "Developer ID identity for team $TEAM_ID is visible"
+          if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+            echo "::error::notarytool keychain profile '$NOTARY_PROFILE' is not usable from this runner session (repository variable OAK_NOTARY_PROFILE)"
+            exit 1
+          fi
+          echo "notarytool profile '$NOTARY_PROFILE' works"
+
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      # ---- depthai-core, hosted (linux-hosted; mirrors ci.yml `check`) -------
+      # No persistent workspace, so no .oak-scripts-tree stamp: the cache key
+      # already covers scripts/depthai/**. Path and key match ci.yml exactly so
+      # the two workflows share one cache entry.
+      - name: depthai install root (hosted)
+        id: root
+        if: inputs.os == 'linux-hosted'
+        run: echo "root=$HOME/.cache/oak-cam/depthai" >> "$GITHUB_OUTPUT"
+
+      - name: Cache depthai-core install (hosted)
+        id: cache
+        if: inputs.os == 'linux-hosted'
+        uses: actions/cache@v4
+        with:
+          # Same two paths as ci.yml (the opencv-* glob only matters on
+          # Windows there, but it is part of the cache version).
+          path: |
+            ${{ steps.root.outputs.root }}/${{ env.DEPTHAI_TAG }}
+            ${{ steps.root.outputs.root }}/opencv-*
+          key: depthai-${{ runner.os }}-${{ runner.arch }}-${{ env.DEPTHAI_TAG }}-${{ hashFiles('scripts/depthai/**') }}
+
+      - name: Build dependencies (hosted, cache miss)
+        if: inputs.os == 'linux-hosted' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config libudev-dev libusb-1.0-0-dev
+
+      # package-linux.sh rewrites the rpath to $ORIGIN with patchelf (and only
+      # warns without it), so install it on every hosted run, hit or miss.
+      - name: Packaging tools (hosted)
+        if: inputs.os == 'linux-hosted'
+        run: |
+          if ! command -v patchelf >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends patchelf
+          fi
+
+      - name: Build depthai-core (hosted, cache miss)
+        if: inputs.os == 'linux-hosted' && steps.cache.outputs.cache-hit != 'true'
+        run: scripts/depthai/build.sh
+
+      - name: Link current (hosted)
+        if: inputs.os == 'linux-hosted'
+        run: |
+          root="${{ steps.root.outputs.root }}"
+          ln -sfn "$root/$DEPTHAI_TAG" "$root/current"
+          test -f "$root/current/oak-flags.json"
+
+      # ---- depthai-core, self-hosted (same install and stamp as self-hosted-ci.yml)
+      - name: depthai-core (Linux)
+        if: runner.os == 'Linux' && inputs.os != 'linux-hosted'
+        run: |
+          root="${OAK_DEPTHAI_ROOT:-$HOME/.cache/oak-cam/depthai}"
+          want="$(git rev-parse HEAD:scripts/depthai)"
+          stamp="$root/current/.oak-scripts-tree"
+          if [ -f "$root/current/oak-flags.json" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$want" ]; then
+            echo "depthai-core install at $(readlink -f "$root/current") is current"
+          else
+            scripts/depthai/build.sh
+            echo "$want" > "$stamp"
+          fi
+
+      - name: depthai-core (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          root="${OAK_DEPTHAI_ROOT:-$HOME/.cache/oak-cam/depthai}"
+          want="$(git rev-parse HEAD:scripts/depthai)"
+          stamp="$root/current/.oak-scripts-tree"
+          if [ -f "$root/current/oak-flags.json" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$want" ]; then
+            echo "depthai-core install at $(readlink "$root/current" || echo "$root/current") is current"
+          else
+            scripts/depthai/build.sh
+            echo "$want" > "$stamp"
+          fi
+
+      - name: depthai-core (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $root = if ($env:OAK_DEPTHAI_ROOT) { $env:OAK_DEPTHAI_ROOT } else { Join-Path $env:LOCALAPPDATA "oak-cam\depthai" }
+          $want = (& git rev-parse HEAD:scripts/depthai).Trim()
+          $stamp = Join-Path $root "current\.oak-scripts-tree"
+          $flags = Join-Path $root "current\oak-flags.json"
+          if ((Test-Path $flags) -and (Test-Path $stamp) -and ((Get-Content -Raw $stamp).Trim() -eq $want)) {
+            Write-Host "depthai-core install at $root\current is current"
+          } else {
+            .\scripts\depthai\fetch-windows.ps1
+            Set-Content -Path $stamp -Value $want -Encoding ASCII
+          }
+
+      - name: Build oak-cam (native release)
+        run: cargo build --release --locked -p oak-cam
+
+      # ---- macOS: sign, notarise and package on the owner's Mac ----------------
+      # build-macos.sh rebuilds the extension and the app around the binary
+      # above, signs with the Developer ID identity in the login keychain,
+      # embeds the named provisioning profile and notarises through the
+      # notarytool keychain profile. Nothing secret is in the repository.
+      - name: Sign and notarise oak-cam.app (macOS)
+        if: runner.os == 'macOS'
+        env:
+          PROFILE_NAME: ${{ vars.OAK_MACOS_PROFILE_NAME || 'OakCam Developer ID' }}
+          NOTARY_PROFILE: ${{ vars.OAK_NOTARY_PROFILE || 'sc-notary' }}
+        run: |
+          prof=""
+          for p in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"/*.provisionprofile \
+                   "$HOME/Library/MobileDevice/Provisioning Profiles"/*.provisionprofile; do
+            [ -f "$p" ] || continue
+            n="$(security cms -D -i "$p" 2>/dev/null | plutil -extract Name raw -o - - 2>/dev/null || true)"
+            if [ "$n" = "$PROFILE_NAME" ]; then prof="$p"; break; fi
+          done
+          if [ -z "$prof" ]; then
+            echo "::error::no provisioning profile named '$PROFILE_NAME' in this Mac's Xcode profile store (repository variable OAK_MACOS_PROFILE_NAME)"
+            exit 1
+          fi
+          scripts/vcam/build-macos.sh --check --binary target/release/oak-cam \
+            --provisionprofile "$prof" --notarize "$NOTARY_PROFILE" --out dist
+
+      - name: Assemble macOS package (zip + notarised DMG)
+        id: pkg_macos
+        if: runner.os == 'macOS'
+        env:
+          NOTARY_PROFILE: ${{ vars.OAK_NOTARY_PROFILE || 'sc-notary' }}
+        run: scripts/ci/package-macos.sh --dmg --notarize "$NOTARY_PROFILE"
+
+      - name: Assemble Linux package
+        id: pkg_linux
+        if: runner.os == 'Linux'
+        run: scripts/ci/package-linux.sh
+
+      - name: Assemble Windows package (and smoke-test --version)
+        id: pkg_windows
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\scripts\ci\package-windows.ps1
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oak-cam-${{ inputs.os }}-${{ steps.pkg_windows.outputs.sha7 || steps.pkg_linux.outputs.sha7 || steps.pkg_macos.outputs.sha7 }}
+          path: |
+            dist/pkg-staging/*.zip
+            dist/pkg-staging/*.tar.gz
+            dist/pkg-staging/*.dmg
+            dist/pkg-staging/SHA256SUMS.txt
+            dist/pkg-staging/BUILD-INFO.json
+          if-no-files-found: error
+          retention-days: 30

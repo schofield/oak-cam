@@ -1,0 +1,45 @@
+[package]
+name = "vcam"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "OS virtual cameras (CoreMediaIO extension, v4l2loopback, Media Foundation) for oak-cam, ported from stream-concern"
+publish = false
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+
+# CoreMediaIO client side: the handful of CMIO C functions are declared by hand
+# in src/macos/mod.rs; frames go into IOSurface-backed CVPixelBuffers from a
+# pool, wrapped in CMSampleBuffers. The install flow drives
+# OSSystemExtensionRequest through objc2 and a private dispatch queue.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-foundation = { version = "0.3.2", features = ["NSString", "NSError"] }
+objc2-core-foundation = { version = "0.3.2", features = ["CFString", "CFNumber", "CFDictionary"] }
+objc2-core-video = { version = "0.3.2", features = [
+    "CVBuffer",
+    "CVImageBuffer",
+    "CVPixelBuffer",
+    "CVPixelBufferPool",
+    "CVPixelBufferIOSurface",
+    "CVReturn",
+    "objc2-io-surface",
+] }
+objc2-core-media = "0.3.2"
+objc2-io-surface = { version = "0.3.2", default-features = false, features = ["std", "IOSurfaceRef", "objc2-core-foundation"] }
+dispatch2 = "0.3"
+
+# v4l2loopback via raw ioctls and write(2).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+# Media Foundation virtual camera: the ring, registration and
+# MFCreateVirtualCamera host live in oak-mf-vcam beside the DLL.
+[target.'cfg(target_os = "windows")'.dependencies]
+oak-mf-vcam = { path = "../../extensions/oak-mf-vcam" }
+
+[lints]
+workspace = true

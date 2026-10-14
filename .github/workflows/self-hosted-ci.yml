@@ -1,0 +1,157 @@
+# Per-push CI on the owner's self-hosted x86 box (free), for whichever OS it
+# is booted into (it dual-boots Linux and Windows 11 and registers as
+# [self-hosted, linux] or [self-hosted, windows]): format, clippy and the
+# workspace tests, then the platform's release/virtual-camera build. The
+# hosted runners in ci.yml are the weekly cross-platform safety net and the
+# only macOS coverage; hardware.yml runs the #[ignore] device tests on demand.
+# The owner's Mac is also a self-hosted runner ([self-hosted, macos], see
+# scripts/ci/setup-macos-runner.sh) but only for the signed macOS package.
+#
+# One-time box setup: scripts/ci/setup-linux-runner.sh and
+# scripts/ci/setup-windows-runner.ps1.
+name: Self-hosted CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/hardware.yml"
+      - ".github/workflows/package.yml"
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+  workflow_dispatch:
+
+concurrency:
+  group: self-hosted-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    # Never run code from a fork's pull request on the owner's machine.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # A cold depthai-core build is 20-60 min; later runs reuse the install.
+    timeout-minutes: 90
+    # X64 keeps this on the x86 box: the Mac runner (setup-macos-runner.sh,
+    # ARM64) only serves package.yml -f os=macos.
+    runs-on: [self-hosted, X64]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Keep the self-hosted workspace between runs: the default clean removes
+      # ignored files, which throws away target/ every run.
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+
+      # A self-hosted Windows runner resolves `bash` to the WSL launcher in
+      # System32 (hosted runners put Git's bin first); every `shell: bash`
+      # step needs Git Bash, so prepend it.
+      - name: Prefer Git Bash over WSL for bash steps (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $git = (Get-Command git.exe).Source
+          $bin = Join-Path (Split-Path (Split-Path $git -Parent) -Parent) "bin"
+          if (-not (Test-Path (Join-Path $bin "bash.exe"))) { throw "Git Bash not found under $bin" }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+
+      # rustup installs the channel and components rust-toolchain.toml pins.
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: |
+          rustup toolchain install
+          rustc --version
+          cargo --version
+
+      # ---- depthai-core, installed on the box outside the workspace ----------
+      # Rebuilt only when scripts/depthai/ changes: the install records the git
+      # tree id of scripts/depthai it was made from (line-ending independent).
+      - name: Validate build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          missing=0
+          for command in cc c++ cmake git ninja pkg-config; do
+            command -v "$command" >/dev/null 2>&1 || { echo "missing command: $command" >&2; missing=1; }
+          done
+          for module in libudev libusb-1.0; do
+            pkg-config --exists "$module" || { echo "missing pkg-config module: $module" >&2; missing=1; }
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "run scripts/ci/setup-linux-runner.sh --skip-runner as the runner owner" >&2
+            exit 1
+          fi
+
+      - name: depthai-core (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          root="${OAK_DEPTHAI_ROOT:-$HOME/.cache/oak-cam/depthai}"
+          want="$(git rev-parse HEAD:scripts/depthai)"
+          stamp="$root/current/.oak-scripts-tree"
+          if [ -f "$root/current/oak-flags.json" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$want" ]; then
+            echo "depthai-core install at $(readlink -f "$root/current") is current (scripts/depthai $want)"
+          else
+            scripts/depthai/build.sh
+            echo "$want" > "$stamp"
+          fi
+
+      - name: depthai-core (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $root = if ($env:OAK_DEPTHAI_ROOT) { $env:OAK_DEPTHAI_ROOT } else { Join-Path $env:LOCALAPPDATA "oak-cam\depthai" }
+          $want = (& git rev-parse HEAD:scripts/depthai).Trim()
+          $stamp = Join-Path $root "current\.oak-scripts-tree"
+          $flags = Join-Path $root "current\oak-flags.json"
+          if ((Test-Path $flags) -and (Test-Path $stamp) -and ((Get-Content -Raw $stamp).Trim() -eq $want)) {
+            Write-Host "depthai-core install at $root\current is current (scripts/depthai $want)"
+          } else {
+            .\scripts\depthai\fetch-windows.ps1
+            Set-Content -Path $stamp -Value $want -Encoding ASCII
+          }
+          # depthai-core.dll, dynamic_calibration.dll, opencv_world*.dll and
+          # libusb-1.0.dll for the test executables.
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $root "current\bin")
+
+      # ---- checks --------------------------------------------------------------
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test --workspace --no-fail-fast
+
+      # ---- Linux -----------------------------------------------------------------
+      - name: Release build (Linux)
+        if: runner.os == 'Linux'
+        run: cargo build --release --locked
+
+      # TODO(M4b): scripts/vcam/linux-setup.sh does not exist yet; once it does,
+      # its --check mode verifies v4l2loopback is loaded with the three devices.
+      - name: v4l2loopback check (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if [ -x scripts/vcam/linux-setup.sh ]; then
+            scripts/vcam/linux-setup.sh --check
+          else
+            echo "scripts/vcam/linux-setup.sh not present yet (M4b); skipped"
+          fi
+
+      # ---- Windows ---------------------------------------------------------------
+      - name: Virtual camera DLL (Windows)
+        if: runner.os == 'Windows'
+        run: cargo build -p oak-mf-vcam
+
+      # Release build of oak_mf_vcam.dll through the script users run; no
+      # -Register (that needs an administrator and changes the machine).
+      - name: build-windows.ps1 (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\scripts\vcam\build-windows.ps1

@@ -1,0 +1,49 @@
+[package]
+name = "oak-cam"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Turns a Luxonis OAK-D Pro into three virtual webcams"
+publish = false
+build = "build.rs"
+
+[[bin]]
+name = "oak-cam"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+crossbeam-channel.workspace = true
+depthai = { path = "../depthai" }
+# Only for the `links = "depthai"` metadata (DEP_DEPTHAI_LIBDIR) in build.rs.
+depthai-sys = { path = "../depthai-sys" }
+dirs = "6"
+# GUI: egui via eframe (wgpu backend), the versions stream-concern uses.
+eframe = "0.36.1"
+egui = "0.36.1"
+libc.workspace = true
+notify = "8"
+oak-core = { path = "../oak-core" }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
+vcam = { path = "../vcam" }
+
+# Native macOS integration, as stream-concern: the system menu bar.
+[target.'cfg(target_os = "macos")'.dependencies]
+# Native NSMenu. Shares objc2 0.6 / objc2-app-kit 0.3 with eframe.
+muda = "=0.19.3"
+# Only for the EventLoopBuilderExtMacOS trait (kill winit's default menu).
+# eframe does not re-export winit, so depend on it directly, features off.
+winit = { version = "=0.30.13", default-features = false }
+
+# Embeds assets/icon/oak-cam.ico as the exe icon (build.rs, Windows only).
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1.31"
+
+[lints]
+workspace = true

@@ -1,0 +1,2 @@
+# Proper nouns used in docs that are not code.
+doc-valid-idents = ["MxId", "XLink", "PoE", ".."]

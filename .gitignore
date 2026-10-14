@@ -1,0 +1,19 @@
+/target
+/dist
+# local depthai-core install (scripts/depthai/build.sh writes ~/.cache/oak-cam by default;
+# a symlink or copy under target/ is also ignored)
+/target/depthai
+*.nv12
+*.gray8
+
+# local agent notes and worktrees
+/AGENTS.md
+/.worktrees
+/.claude/worktrees
+
+# local planning notes and container config (not published)
+/PLAN.md
+/.mcp.json
+/.nemesis8.toml
+/client
+/server

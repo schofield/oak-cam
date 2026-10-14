@@ -1,0 +1,37 @@
+[package]
+name = "oak-mf-vcam"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Windows 11 virtual camera for oak-cam (ported from stream-concern): a Media Foundation custom media source loaded by the Frame Server, fed from oak-cam through a shared-memory ring."
+
+# The cdylib is the COM server the Frame Server loads (`oak_mf_vcam.dll`); the
+# rlib lets the app (crates/vcam) and the tests share the ring layout, the
+# CLSID, the registration helpers and the virtual-camera activation code with
+# the DLL. Off Windows only the pure modules (ring layout, format table,
+# converters, placeholder) compile, so every Mac and Linux gate stays green.
+[lib]
+name = "oak_mf_vcam"
+crate-type = ["cdylib", "rlib"]
+
+[target.'cfg(target_os = "windows")'.dependencies]
+parking_lot = "0.12"
+windows-core = "0.62"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media",
+    "Win32_Media_KernelStreaming",
+    "Win32_Media_MediaFoundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+] }

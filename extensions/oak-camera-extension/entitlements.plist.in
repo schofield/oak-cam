@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Entitlements for the camera extension process. A CoreMediaIO camera extension
+  must run in the App Sandbox, and its CMIOExtensionMachServiceName must be
+  prefixed by one of its application groups (TEAMID.<app bundle id>); the group
+  is the same one the app declares so the two can rendezvous. Rationale and
+  Apple references are in docs/release.md ("Virtual camera"). Keep this plist
+  minimal: codesign's AMFI parser is strict (no XML DOCTYPE, no double hyphen
+  inside comments). @TEAM_ID@ is substituted by scripts/vcam/build-macos.sh.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>@TEAM_ID@.com.surlysoft.oak-cam</string>
+    </array>
+</dict>
+</plist>

@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2F7A47"/>
+      <stop offset="1" stop-color="#143B25"/>
+    </linearGradient>
+    <radialGradient id="bgGlow" cx="0.5" cy="0.12" r="0.75">
+      <stop offset="0" stop-color="#7FCF95" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#7FCF95" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="cap" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#D9A45A"/>
+      <stop offset="1" stop-color="#8A5424"/>
+    </linearGradient>
+    <linearGradient id="capBrim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7A4A1F"/>
+      <stop offset="1" stop-color="#5A3312"/>
+    </linearGradient>
+    <linearGradient id="stem" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#6A3F18"/>
+      <stop offset="1" stop-color="#8F5A2B"/>
+    </linearGradient>
+    <radialGradient id="glass" cx="0.38" cy="0.32" r="0.75">
+      <stop offset="0" stop-color="#5FB4FF"/>
+      <stop offset="0.45" stop-color="#0A84FF"/>
+      <stop offset="1" stop-color="#03214A"/>
+    </radialGradient>
+    <radialGradient id="iris" cx="0.45" cy="0.4" r="0.7">
+      <stop offset="0" stop-color="#0B3B78"/>
+      <stop offset="1" stop-color="#020C1E"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3A4A5C"/>
+      <stop offset="1" stop-color="#0B121B"/>
+    </linearGradient>
+    <linearGradient id="spec" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="scales" width="64" height="56" patternUnits="userSpaceOnUse" patternTransform="translate(0 6)">
+      <path d="M32 6 L56 28 L32 50 L8 28 Z" fill="none" stroke="#5E3714" stroke-opacity="0.55" stroke-width="7"/>
+      <path d="M0 -22 L24 0 L0 22 L-24 0 Z M64 -22 L88 0 L64 22 L40 0 Z M0 34 L24 56 L0 78 L-24 56 Z M64 34 L88 56 L64 78 L40 56 Z" fill="none" stroke="#5E3714" stroke-opacity="0.55" stroke-width="7"/>
+    </pattern>
+    <clipPath id="capClip">
+      <path d="M236 486 C236 336 344 250 512 250 C680 250 788 336 788 486 Z"/>
+    </clipPath>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="18"/>
+      <feOffset dy="22"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.45"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- macOS squircle background (824 px on the 1024 grid) -->
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="url(#bgGlow)"/>
+
+  <g filter="url(#shadow)">
+    <!-- lens (the acorn's nut) -->
+    <circle cx="512" cy="646" r="228" fill="url(#ring)"/>
+    <circle cx="512" cy="646" r="228" fill="none" stroke="#6B7C90" stroke-opacity="0.5" stroke-width="4"/>
+    <circle cx="512" cy="646" r="190" fill="url(#glass)"/>
+    <circle cx="512" cy="646" r="108" fill="url(#iris)"/>
+    <circle cx="512" cy="646" r="108" fill="none" stroke="#5FB4FF" stroke-opacity="0.35" stroke-width="6"/>
+    <circle cx="512" cy="646" r="38" fill="#01060F"/>
+    <circle cx="498" cy="632" r="10" fill="#FFFFFF" fill-opacity="0.8"/>
+    <!-- specular highlight -->
+    <ellipse cx="436" cy="566" rx="66" ry="38" transform="rotate(-32 436 566)" fill="url(#spec)"/>
+    <path d="M392 752 A150 150 0 0 0 626 772" fill="none" stroke="#9BD3FF" stroke-opacity="0.35" stroke-width="10" stroke-linecap="round"/>
+
+    <!-- stem -->
+    <path d="M512 282 C512 240 532 212 570 186" fill="none" stroke="url(#stem)" stroke-width="44" stroke-linecap="round"/>
+
+    <!-- cap -->
+    <path d="M236 486 C236 336 344 250 512 250 C680 250 788 336 788 486 Z" fill="url(#cap)"/>
+    <rect x="200" y="230" width="624" height="280" fill="url(#scales)" clip-path="url(#capClip)"/>
+    <!-- cap brim -->
+    <path d="M210 476 C210 456 232 446 512 446 C792 446 814 456 814 476 C814 512 692 534 512 534 C332 534 210 512 210 476 Z" fill="url(#capBrim)"/>
+    <path d="M232 470 C300 456 400 450 512 450 C624 450 724 456 792 470" fill="none" stroke="#E8B86A" stroke-opacity="0.5" stroke-width="8" stroke-linecap="round"/>
+  </g>
+</svg>

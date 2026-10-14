@@ -1,0 +1,23 @@
+[package]
+name = "depthai-sys"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Raw C bindings to a thin shim over depthai-core (Luxonis OAK) v3"
+links = "depthai"
+build = "build.rs"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+
+[build-dependencies]
+cc = { version = "1", features = ["parallel"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true
