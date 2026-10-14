@@ -47,10 +47,13 @@
 #                          activate a Developer ID system extension from an app
 #                          without a notarisation ticket.
 #   --version <x.y.z>      CFBundleShortVersionString (default: Cargo.toml).
-#   --build <n>            CFBundleVersion (default <major>.<minor>.<git commit
-#                          count>). A rebuilt extension MUST carry a higher
-#                          CFBundleVersion or macOS keeps running the old one;
-#                          pass --build when reinstalling uncommitted changes.
+#   --build <n>            CFBundleVersion (default <major>.<minor>.<HEAD commit
+#                          time, seconds since the epoch>). A rebuilt extension
+#                          MUST carry a higher CFBundleVersion or macOS keeps
+#                          running the old one; the commit time only grows, and
+#                          unlike a commit count it survives a history rewrite
+#                          or a shallow clone. Pass --build when reinstalling
+#                          uncommitted changes.
 #   --arch <arm64|x86_64|universal>   extension slices (default universal,
 #                          falling back to the host arch).
 #   --binary <path>        use this oak-cam binary instead of cargo build.
@@ -200,20 +203,24 @@ if [[ -z "$VERSION" ]]; then
     VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/Cargo.toml" | head -1)"
     [[ -n "$VERSION" ]] || die "could not read version from Cargo.toml"
 fi
-# Apple caps CFBundleVersion at three integers, so the commit count is the
-# third field; it only grows with history, so a rebuilt extension from a later
-# commit replaces the installed one.
+# Apple caps CFBundleVersion at three integers, so the HEAD commit time
+# (seconds since the epoch) is the third field; it only grows, so a rebuilt
+# extension from a later commit replaces the installed one. Builds before
+# 2026-10-14 used the commit count (up to 0.1.92), which is lower.
 if [[ -z "$BUILD" ]]; then
-    if count="$(git -C "$REPO_ROOT" rev-list --count HEAD 2>/dev/null)" && [[ -n "$count" ]]; then
-        BUILD="$(echo "$VERSION" | cut -d. -f1,2).$count"
-        if [[ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]]; then
+    if ctime="$(git -C "$REPO_ROOT" -c log.showSignature=false show -s --format=%ct HEAD 2>/dev/null)" && [[ "$ctime" =~ ^[0-9]+$ ]]; then
+        BUILD="$(echo "$VERSION" | cut -d. -f1,2).$ctime"
+        if [[ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
             warn "uncommitted changes: CFBundleVersion $BUILD may equal an installed build;"
-            warn "pass --build <higher n> before installing a changed extension."
+            warn "pass --build $(echo "$VERSION" | cut -d. -f1,2).$(date +%s) before installing a changed extension."
         fi
     else
         BUILD="$VERSION"
+        warn "not a git checkout: CFBundleVersion falls back to $BUILD, which is below any stamped build;"
+        warn "pass --build $(echo "$VERSION" | cut -d. -f1,2).$(date +%s) to install over one."
     fi
 fi
+[[ "$BUILD" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || die "--build '$BUILD' is not one to three period-separated integers"
 
 if [[ -z "$TEAM_ID" ]]; then
     if [[ "$IDENTITY" =~ \(([A-Z0-9]{10})\)$ ]]; then
@@ -440,6 +447,15 @@ fi
 DEST="$INSTALL_DIR/$APP_NAME.app"
 say "installing $DEST"
 if [[ -e "$DEST" ]]; then
+    old_build="$(plutil -extract CFBundleVersion raw -o - "$DEST/Contents/Library/SystemExtensions/$BUNDLE_ID.systemextension/Contents/Info.plist" 2>/dev/null || true)"
+    if [[ -n "$old_build" ]]; then
+        old_n="${old_build##*.}"; new_n="${BUILD##*.}"
+        if [[ "$old_build" == "$BUILD" ]]; then
+            warn "the installed extension is already $old_build; macOS will not replace it (pass --build)"
+        elif [[ "$old_n" =~ ^[0-9]+$ && "$new_n" =~ ^[0-9]+$ && "$new_n" -le "$old_n" ]]; then
+            warn "the installed extension is $old_build, not below $BUILD; macOS may keep it (pass --build)"
+        fi
+    fi
     mv "$DEST" "$HOME/.Trash/$APP_NAME-$(date +%Y%m%d-%H%M%S).app" || die "cannot move the old $DEST to the Trash"
 fi
 /usr/bin/ditto "$APP" "$DEST"
