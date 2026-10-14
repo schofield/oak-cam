@@ -49,10 +49,14 @@ say() { echo ">> $*"; }
 # before giving up, and show stapler's own message on each failure.
 stapler_validate() {
     local target="$1" attempt out
-    for attempt in 1 2 3; do
+    for attempt in 1 2 3 4; do
         if out="$(xcrun stapler validate "$target" 2>&1)"; then return 0; fi
         echo "   stapler validate failed (attempt $attempt): $(printf '%s\n' "$out" | tail -1)" >&2
-        [ "$attempt" -lt 3 ] && sleep 5
+        if [ "$attempt" -lt 4 ]; then
+            sleep $((attempt * 10))
+        else
+            printf '%s\n' "$out" | sed 's/^/      /' >&2
+        fi
     done
     return 1
 }
@@ -132,7 +136,7 @@ if [ "$allow_unnotarized" = "1" ]; then
             authority="$(printf '%s\n' "$sig_info" | sed -n 's/^Authority=\(.*\)$/\1/p' | head -1)"
         fi
     fi
-    if xcrun stapler validate "$app" >/dev/null 2>&1; then
+    if [ -f "$app/Contents/CodeResources" ] && stapler_validate "$app" 2>/dev/null; then
         notarized=yes
         say "a notarisation ticket is stapled after all"
     fi
@@ -269,11 +273,16 @@ if [ "$notarized" = "yes" ]; then
     # The ticket is the plain file Contents/CodeResources; an offline
     # byte-for-byte comparison with the source app proves the zip kept it.
     cmp -s "$app/Contents/CodeResources" "$shipped/Contents/CodeResources" \
-        || die "the extracted bundle's stapled ticket differs from the source app's"
+        || die "the extracted bundle's stapled ticket is missing or differs from the source app's"
+    src_cdhash="$(codesign -dvvv "$app" 2>&1 | sed -n 's/^CDHash=//p' | head -1)"
+    out_cdhash="$(codesign -dvvv "$shipped" 2>&1 | sed -n 's/^CDHash=//p' | head -1)"
+    [ -n "$src_cdhash" ] && [ "$src_cdhash" = "$out_cdhash" ] \
+        || die "the extracted bundle's code hash ($out_cdhash) differs from the source app's ($src_cdhash)"
     if ! stapler_validate "$shipped"; then
-        echo "::warning::stapler could not validate the extracted copy (ticket identical to the source, which validated; likely Apple's ticket service)" >&2
+        echo "::warning::stapler could not validate the extracted copy (ticket and code hash identical to the source, which validated; likely Apple's ticket service)" >&2
     fi
-    spctl --assess --type execute "$shipped" || die "Gatekeeper rejected the extracted bundle"
+    assess="$(spctl --assess --type execute --verbose=2 "$shipped" 2>&1)" || die "Gatekeeper rejected the extracted bundle: $assess"
+    printf '%s\n' "$assess" | grep -q 'source=Notarized Developer ID' || die "Gatekeeper did not see a notarised Developer ID app in the extracted bundle: $assess"
 fi
 "$shipped/Contents/MacOS/oak-cam" --version >/dev/null || die "the extracted oak-cam does not run"
 say "extracted bundle verified"
